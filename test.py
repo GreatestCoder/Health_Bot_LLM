@@ -1,4 +1,6 @@
 import os
+import io
+import re
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
@@ -11,7 +13,11 @@ from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_groq import ChatGroq
-import re
+
+# Additional imports for voice functionality
+import speech_recognition as sr
+from gtts import gTTS
+from streamlit_audiorecorder import audiorecorder
 
 # Load environment variables
 load_dotenv()
@@ -28,7 +34,9 @@ st.image(logo_path, width=100, use_column_width=False)
 # Display title and description
 st.markdown("""
     <h1 style='text-align: center; color: #2C3E50;'>AI-Powered Symptom Checker</h1>
-    <p style='text-align: center; color: #7F8C8D;'>Get potential diagnoses based on your symptoms. This tool is not a substitute for professional healthcare advice.</p>
+    <p style='text-align: center; color: #7F8C8D;'>
+        Get potential diagnoses based on your symptoms. This tool is for educational purposes only and is not a substitute for professional healthcare advice.
+    </p>
 """, unsafe_allow_html=True)
 
 # Load dataset
@@ -44,7 +52,6 @@ def load_model_and_vectorstore():
     
     llm = ChatGroq(groq_api_key=groq_api_key, model_name="Gemma2-9b-It")
     retriever = vectorstore.as_retriever()
-
     return llm, retriever
 
 with st.spinner('Building the FAISS vectorstore. Please wait...'):
@@ -52,7 +59,6 @@ with st.spinner('Building the FAISS vectorstore. Please wait...'):
 st.success("Vectorstore built successfully!")
 
 # LangChain pipeline setup
-
 contextualize_q_system_prompt = (
     "You are a multilingual assistant for diagnosing symptoms. "
     "Your task is to help users understand health issues by formulating clear and concise questions based on their input. "
@@ -114,32 +120,57 @@ def extract_disease(response: str):
                 'Common Cold', 'Pneumonia', 'Dimorphic Hemorrhoids', 'Arthritis', 'Acne', 'Bronchial Asthma', 'Hypertension',
                 'Migraine', 'Cervical spondylosis', 'Jaundice', 'Malaria', 'Urinary tract infection', 'Allergy',
                 'Gastroesophageal reflux disease', 'Drug reaction', 'Peptic ulcer disease', 'Diabetes']
-    
     return [disease for disease in diseases if re.search(r'\b' + re.escape(disease) + r'\b', response, re.IGNORECASE)]
 
-# User interface
+# User interface: Choose between Text and Voice Input
 session_id = st.text_input("Session ID", value="default_session", key="session_id")
-user_input = st.text_area("Describe your symptoms:", height=100, placeholder="Type your symptoms here...")
+input_mode = st.radio("Choose input mode:", ["Text", "Voice"])
 
-if st.button("Submit", key="submit_button"):
-    if user_input:
-        with st.spinner('Processing your symptoms...'):
-            session_history = get_session_history(session_id)
-            response = conversational_rag_chain.invoke(
-                {"input": user_input},
-                config={"configurable": {"session_id": session_id}}
-            )
+user_input = ""
+if input_mode == "Text":
+    user_input = st.text_area("Describe your symptoms:", height=100, placeholder="Type your symptoms here...")
+else:
+    st.markdown("Click the button below to record your symptoms.")
+    audio_bytes = audiorecorder("Record", text="Recording...")
+    if audio_bytes is not None:
+        recognizer = sr.Recognizer()
+        try:
+            # Use SpeechRecognition to convert the audio bytes to text
+            audio_file = sr.AudioFile(io.BytesIO(audio_bytes))
+            with audio_file as source:
+                audio_data = recognizer.record(source)
+            user_input = recognizer.recognize_google(audio_data)
+            st.write("You said:", user_input)
+        except Exception as e:
+            st.error("Error processing audio: " + str(e))
 
-        # Extract possible diseases
-        possible_diseases = extract_disease(response["answer"])
-        
-        # Display results
-        st.markdown('<div style="background-color: #F4F6F7; padding: 15px; border-radius: 10px;">', unsafe_allow_html=True)
-        if possible_diseases:
-            st.write(f"Possible condition(s): **{', '.join(possible_diseases)}**")
-        else:
-            st.write("Assistant: ", response["answer"])
-        st.markdown('</div>', unsafe_allow_html=True)
+# Process input when user submits
+if st.button("Submit", key="submit_button") and user_input:
+    with st.spinner('Processing your symptoms...'):
+        session_history = get_session_history(session_id)
+        response = conversational_rag_chain.invoke(
+            {"input": user_input},
+            config={"configurable": {"session_id": session_id}}
+        )
+
+    # Extract possible diseases
+    possible_diseases = extract_disease(response["answer"])
+    
+    # Display text response
+    st.markdown('<div style="background-color: #F4F6F7; padding: 15px; border-radius: 10px;">', unsafe_allow_html=True)
+    if possible_diseases:
+        st.write(f"Possible condition(s): **{', '.join(possible_diseases)}**")
+    else:
+        st.write("Assistant: ", response["answer"])
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Generate voice response using gTTS and play the audio
+    try:
+        tts = gTTS(response["answer"])
+        tts.save("response.mp3")
+        st.audio("response.mp3", format="audio/mp3")
+    except Exception as e:
+        st.error("Error generating voice response: " + str(e))
 
 # Footer
 st.markdown("""
