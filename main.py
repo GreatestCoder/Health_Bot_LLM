@@ -2,6 +2,7 @@ import os
 import io
 import re
 import pandas as pd
+import numpy as np
 import streamlit as st
 from dotenv import load_dotenv
 from langchain.embeddings import HuggingFaceEmbeddings
@@ -178,3 +179,125 @@ st.markdown("""
         This tool is for educational purposes only. Always consult a healthcare professional.
     </p>
 """, unsafe_allow_html=True)
+
+import numpy as np
+import math
+
+def top_k_accuracy(predictions, ground_truth, k):
+    """
+    Computes Top-K Accuracy.
+    
+    :param predictions: List of lists, each inner list is a ranked prediction list for a query.
+    :param ground_truth: List of sets (or lists) containing the correct diagnoses for each query.
+    :param k: Integer, the cutoff rank.
+    :return: Top-K Accuracy as a float.
+    """
+    correct = 0
+    total = len(predictions)
+    for pred, gt in zip(predictions, ground_truth):
+        if any(item in pred[:k] for item in gt):
+            correct += 1
+    return correct / total if total > 0 else 0
+
+def mean_reciprocal_rank(predictions, ground_truth):
+    """
+    Computes Mean Reciprocal Rank (MRR).
+    
+    :param predictions: List of ranked prediction lists.
+    :param ground_truth: List of sets (or lists) of relevant items for each query.
+    :return: Mean Reciprocal Rank as a float.
+    """
+    mrr = 0.0
+    total = len(predictions)
+    for pred, gt in zip(predictions, ground_truth):
+        for rank, item in enumerate(pred, start=1):
+            if item in gt:
+                mrr += 1.0 / rank
+                break
+    return mrr / total if total > 0 else 0
+
+def average_precision(pred, gt):
+    """
+    Computes Average Precision (AP) for a single query.
+    
+    :param pred: Ranked list of predicted items.
+    :param gt: Set (or list) of ground truth items.
+    :return: Average Precision as a float.
+    """
+    hits = 0
+    sum_precisions = 0.0
+    for i, item in enumerate(pred, start=1):
+        if item in gt:
+            hits += 1
+            sum_precisions += hits / i
+    return sum_precisions / len(gt) if gt else 0
+
+def mean_average_precision(predictions, ground_truth):
+    """
+    Computes Mean Average Precision (MAP) over all queries.
+    
+    :param predictions: List of ranked prediction lists.
+    :param ground_truth: List of sets (or lists) of relevant items.
+    :return: MAP as a float.
+    """
+    total_ap = 0.0
+    total = len(predictions)
+    for pred, gt in zip(predictions, ground_truth):
+        total_ap += average_precision(pred, gt)
+    return total_ap / total if total > 0 else 0
+
+def dcg_at_k(pred, gt, k):
+    """
+    Computes Discounted Cumulative Gain (DCG) at rank k for a single query.
+    Here, we assume binary relevance (1 if item is in ground truth, 0 otherwise).
+    
+    :param pred: Ranked list of predictions.
+    :param gt: Set (or list) of ground truth items.
+    :param k: Rank cutoff.
+    :return: DCG value.
+    """
+    dcg = 0.0
+    for i, item in enumerate(pred[:k], start=1):
+        if item in gt:
+            dcg += 1.0 / math.log2(i + 1)
+    return dcg
+
+def ndcg_at_k(predictions, ground_truth, k):
+    """
+    Computes Normalized Discounted Cumulative Gain (NDCG) at rank k over all queries.
+    
+    :param predictions: List of ranked prediction lists.
+    :param ground_truth: List of sets (or lists) of ground truth items.
+    :param k: Rank cutoff.
+    :return: NDCG as a float.
+    """
+    ndcg_total = 0.0
+    total = len(predictions)
+    for pred, gt in zip(predictions, ground_truth):
+        dcg = dcg_at_k(pred, gt, k)
+        # Compute ideal DCG: assume all ground truth items are ranked in the top positions.
+        ideal_hits = min(len(gt), k)
+        idcg = sum(1.0 / math.log2(i + 1) for i in range(1, ideal_hits + 1))
+        ndcg = dcg / idcg if idcg > 0 else 0.0
+        ndcg_total += ndcg
+    return ndcg_total / total if total > 0 else 0
+
+# Example usage:
+if __name__ == "__main__":
+    # Suppose we have three queries with their predictions and ground truth.
+    predictions = [
+        ["Hypertension", "Migraine", "Diabetes"],   # Query 1 predictions
+        ["Common Cold", "Pneumonia", "Asthma"],       # Query 2 predictions
+        ["Diabetes", "Hypertension", "Arthritis"]       # Query 3 predictions
+    ]
+    ground_truth = [
+        {"Migraine", "Hypertension"},  # Query 1 ground truth
+        {"Pneumonia"},                 # Query 2 ground truth
+        {"Hypertension"}               # Query 3 ground truth
+    ]
+    
+    k = 3
+    print("Top-{} Accuracy: {:.2f}".format(k, top_k_accuracy(predictions, ground_truth, k)))
+    print("Mean Reciprocal Rank (MRR): {:.2f}".format(mean_reciprocal_rank(predictions, ground_truth)))
+    print("Mean Average Precision (MAP): {:.2f}".format(mean_average_precision(predictions, ground_truth)))
+    print("NDCG@{}: {:.2f}".format(k, ndcg_at_k(predictions, ground_truth, k)))
