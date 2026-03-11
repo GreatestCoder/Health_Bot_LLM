@@ -43,7 +43,7 @@ def load_model_and_vectorstore():
     metadata = [{"label": label} for label in dataset['label'].tolist()]
     vectorstore = FAISS.from_texts(documents, embedder, metadatas=metadata)
     
-    llm = ChatGroq(groq_api_key=groq_api_key, model_name="Gemma2-9b-It")
+    llm = ChatGroq(groq_api_key=groq_api_key, model_name="llama-3.3-70b-versatile")
     retriever = vectorstore.as_retriever()
     return llm, retriever
 
